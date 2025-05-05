@@ -1,0 +1,47 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  passwordHash  String
+  openaiKey     String
+  anthropicKey  String
+  googleId      String?  @unique
+  clients       Client[]
+}
+
+model Client {
+  id        String    @id @default(cuid())
+  name      String
+  context   String?
+  sheetId   String?
+  user      User      @relation(fields: [userId], references: [id])
+  userId    String
+  createdAt DateTime  @default(now())
+  campaigns Campaign[]
+}
+
+model Campaign {
+  id        String     @id @default(cuid())
+  name      String
+  context   String?
+  client    Client     @relation(fields: [clientId], references: [id])
+  clientId  String
+  adGroups  AdGroup[]
+}
+
+model AdGroup {
+  id         String   @id @default(cuid())
+  name       String
+  keywords   String
+  context    String?
+  campaign   Campaign @relation(fields: [campaignId], references: [id])
+  campaignId String
+}
