@@ -17,8 +17,8 @@ Pour commencer, connectez-vous avec votre compte Google ci-dessous.
 """)
 
 # ─── 2) Bouton “Continue with Google” (Google Identity Services) ──────────────
-GSI_CLIENT_ID = "<VOTRE_CLIENT_ID_OAUTH>"           # Remplacez par votre client_id
-REDIRECT_URI  = "https://votre-app.streamlit.app/"  # L’URL publique de votre app
+GSI_CLIENT_ID = "850645921594-fk7ui31vi4dmn28keau12f1nlu001967.apps.googleusercontent.com"           # Remplacez par votre client_id
+REDIRECT_URI  = "https://app-ads-utility-t9injwcft7vwzxhtpaxwia.streamlit.app/"  # L’URL publique de votre app
 
 st.markdown(f"""
 <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -61,7 +61,7 @@ try:
         refresh_token=id_info.get("refresh_token"),
         token_uri="https://oauth2.googleapis.com/token",
         client_id=GSI_CLIENT_ID,
-        client_secret="<VOTRE_CLIENT_SECRET>"
+        client_secret="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"
     )
     # Sauvegarde pour réutilisation
     with open("token.json", "w", encoding="utf-8") as f:
