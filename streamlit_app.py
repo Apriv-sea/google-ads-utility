@@ -2,12 +2,12 @@ import os
 import streamlit as st
 from google_auth_oauthlib.flow import Flow
 from google.oauth2.credentials import Credentials
-from google.auth.transport.requests import Request
 
 # ─── 0) Configuration de la page ─────────────────────────────────────────────
 st.set_page_config(page_title="IA Ad Generator", layout="wide")
 
 # ─── 1) INITIALISATION DU FLOW GOOGLE OAUTH ─────────────────────────────────
+# ⚠️ Remplacez cette URI par celle configurée dans votre console Google Cloud (slash final inclus)
 REDIRECT_URI = "https://app-ads-utility-t9injwcft7vwzxhtpaxwia.streamlit.app/"
 
 flow = Flow.from_client_secrets_file(
@@ -17,54 +17,51 @@ flow = Flow.from_client_secrets_file(
 )
 auth_url, _ = flow.authorization_url(prompt="consent", access_type="offline")
 
-# ─── 2) PAGE D’ACCUEIL AVANT AUTHENTIFICATION ────────────────────────────────
+# ─── 2) GESTION DU LOGIN ──────────────────────────────────────────────────────
 params = st.query_params
+code   = params.get("code", [None])[0]
 
-# a) si l’utilisateur vient de cliquer sur “Continue with Google”
+# a) Si on vient juste de cliquer sur “Continue with Google”, on redirige
 if "auth_url" in params:
-    st.experimental_set_query_params()  # vide l’URL
+    st.experimental_set_query_params()  # nettoie l’URL
     st.markdown(
         f'<meta http-equiv="refresh" content="0; url={auth_url}" />',
         unsafe_allow_html=True
     )
     st.stop()
 
-# b) sinon, afficher le titre + bouton
-st.title("Welcome to IA Ad Generator")
-st.write("Pour commencer, connectez-vous avec votre compte Google ci-dessous.")
+# b) Si on n’a ni code OAuth ni token.json, on affiche la page d’accueil
+if code is None and not os.path.exists("token.json"):
+    st.title("Welcome to IA Ad Generator")
+    st.write(
+        "I am your AI assistant—ready to help you generate high-impact Google Ads titles "
+        "and descriptions directly in your Google Sheet."
+    )
+    btn_img = "https://developers.google.com/identity/images/btn_google_signin_light_normal_web.png"
+    st.markdown(f"[![Continue with Google]({btn_img})]({auth_url})", unsafe_allow_html=True)
+    st.stop()
 
-# bouton Google officiel
-google_btn_url = "https://developers.google.com/identity/images/btn_google_signin_light_normal_web.png"
-st.markdown(
-    f"[![Continue with Google]({google_btn_url})]({auth_url})",
-    unsafe_allow_html=True
-)
-st.stop()
-
-# ─── 3) ÉCHANGE DU CODE CONTRE LE TOKEN ──────────────────────────────────────
-code = params.get("code", [None])[0]
-
+# c) Si Google renvoie un code, on l’échange contre un token
 if code:
     flow.fetch_token(code=code)
     creds = flow.credentials
+    # Sauvegarde pour réutilisation
     with open("token.json", "w", encoding="utf-8") as f:
         f.write(creds.to_json())
     st.experimental_set_query_params()  # nettoie l’URL
-elif not os.path.exists("token.json"):
-    st.stop()
 
-# ─── 4) AUTHENTIFICATION OK → CHARGEMENT DES LIBS MÉTIER ─────────────────────
+# ─── 3) AUTHENTIFICATION OK → CHARGEMENT DES LIBS MÉTIER ─────────────────────
 from clients.manager import ClientManager
 from sheets.gsheets import get_sheet_manager
 from streamlit_contextualisation import page_contextualisation
 from utils.prompts import get_title_prompt, get_description_prompt
 from generators.openai_provider import OpenAIProvider
 
-# ─── 5) Instanciation des managers ────────────────────────────────────────────
+# ─── 4) Instanciation des managers ────────────────────────────────────────────
 client_manager = ClientManager()
-sheet_manager  = get_sheet_manager()  # charge & rafraîchit token.json
+sheet_manager  = get_sheet_manager()  # charge & rafraîchit token.json si besoin
 
-# ─── 6) Définition des pages ─────────────────────────────────────────────────
+# ─── 5) Définition des pages ─────────────────────────────────────────────────
 def page_clients():
     st.header("Gestion des clients")
     client_manager.render_ui()
@@ -81,10 +78,13 @@ def page_google_sheet():
         value=f"{client}_template" if client else ""
     )
     if st.button("Créer la feuille vierge"):
-        sid = sheet_manager.create_template(title)
-        st.success(f"✅ Sheet créé – ID : {sid}")
-        st.markdown(f"[Ouvrir le sheet](https://docs.google.com/spreadsheets/d/{sid})")
-        client_manager.save_sheet_id(client, sid)
+        try:
+            sid = sheet_manager.create_template(title)
+            st.success(f"✅ Sheet créé – ID : {sid}")
+            st.markdown(f"[Ouvrir le sheet](https://docs.google.com/spreadsheets/d/{sid})")
+            client_manager.save_sheet_id(client, sid)
+        except Exception as e:
+            st.error(f"Erreur lors de la création du sheet : {e}")
 
 def page_contextualisation_wrapper():
     page_contextualisation()
@@ -129,14 +129,14 @@ def page_generation():
             dp = get_description_prompt(brief, ctx, ag, kws)
             prov = OpenAIProvider(model=st.session_state.model)
             titles = prov.generate(tp)
-            descs = prov.generate(dp)
+            descs  = prov.generate(dp)
             sheet_manager.write_results(sid, camp, ag, titles, descs)
             st.success(f"Terminé pour {camp}/{ag}")
 
 def page_results():
     st.header("Résultats")
     client = client_manager.current_client
-    sid = client_manager.get_sheet_id(client)
+    sid    = client_manager.get_sheet_id(client)
     if not sid:
         st.warning("⚠️ Aucune feuille à afficher.")
         return
@@ -152,7 +152,7 @@ def page_results():
             file_name=f"{client}_ads.csv"
         )
 
-# ─── 7) NAVIGATION ─────────────────────────────────────────────────────────────
+# ─── 6) Navigation ────────────────────────────────────────────────────────────
 def main():
     st.sidebar.title("Navigation")
     choices = [
@@ -167,15 +167,14 @@ def main():
     choice = st.sidebar.radio("Aller à", choices)
 
     page_map = {
-        "Clients": page_clients,
-        "Brief Global": page_brief_global,
-        "Google Sheet": page_google_sheet,
-        "Contextualisation": page_contextualisation_wrapper,
+        "Clients":          page_clients,
+        "Brief Global":     page_brief_global,
+        "Google Sheet":     page_google_sheet,
+        "Contextualisation":page_contextualisation_wrapper,
         "Configuration IA": page_configuration_ia,
-        "Génération": page_generation,
-        "Résultats": page_results
+        "Génération":       page_generation,
+        "Résultats":        page_results
     }
-    # Appel de la page correspondante
     page_map[choice]()
 
 if __name__ == "__main__":
