@@ -6,62 +6,74 @@ from google.oauth2.credentials import Credentials
 # ─── 0) Configuration de la page ─────────────────────────────────────────────
 st.set_page_config(page_title="IA Ad Generator", layout="wide")
 
-# ─── 1) INITIALISATION DU FLOW GOOGLE OAUTH ─────────────────────────────────
-# ⚠️ Remplacez cette URI par celle configurée dans votre console Google Cloud (slash final inclus)
+# ─── 1) INITIALISATION DU FLOW & PERSISTENCE DANS SESSION STATE ──────────────
+# Remplacez par l’URI exacte de votre app (slash final inclus)
 REDIRECT_URI = "https://app-ads-utility-t9injwcft7vwzxhtpaxwia.streamlit.app/"
 
-flow = Flow.from_client_secrets_file(
-    "credentials.json",
-    scopes=["https://www.googleapis.com/auth/spreadsheets"],
-    redirect_uri=REDIRECT_URI
-)
+# Si on n’a jamais stocké le flow, on le crée et on garde son state
+if "oauth_flow_state" not in st.session_state:
+    flow = Flow.from_client_secrets_file(
+        "credentials.json",
+        scopes=["https://www.googleapis.com/auth/spreadsheets"],
+        redirect_uri=REDIRECT_URI
+    )
+    st.session_state.oauth_flow_state = flow.state
+else:
+    # On reconstruit un flow avec le même state pour l’échange du code
+    flow = Flow.from_client_secrets_file(
+        "credentials.json",
+        scopes=["https://www.googleapis.com/auth/spreadsheets"],
+        redirect_uri=REDIRECT_URI,
+        state=st.session_state.oauth_flow_state
+    )
+
+# Génération de l’URL d’authentification
 auth_url, _ = flow.authorization_url(prompt="consent", access_type="offline")
 
 # ─── 2) GESTION DU LOGIN ──────────────────────────────────────────────────────
 params = st.query_params
 code   = params.get("code", [None])[0]
 
-# a) Si on vient juste de cliquer sur “Continue with Google”, on redirige
+# a) Si on vient de cliquer sur “Continue with Google”, on redirige vers Google
 if "auth_url" in params:
-    st.experimental_set_query_params()  # nettoie l’URL
+    st.experimental_set_query_params()  # vide les query params
     st.markdown(
         f'<meta http-equiv="refresh" content="0; url={auth_url}" />',
         unsafe_allow_html=True
     )
     st.stop()
 
-# b) Si on n’a ni code OAuth ni token.json, on affiche la page d’accueil
+# b) Si on n’a ni code ni token.json, on affiche l’écran de login
 if code is None and not os.path.exists("token.json"):
     st.title("Welcome to IA Ad Generator")
-    st.write(
-        "I am your AI assistant—ready to help you generate high-impact Google Ads titles "
-        "and descriptions directly in your Google Sheet."
-    )
-    btn_img = "https://developers.google.com/identity/images/btn_google_signin_light_normal_web.png"
-    st.markdown(f"[![Continue with Google]({btn_img})]({auth_url})", unsafe_allow_html=True)
+    st.write("Connectez-vous avec votre compte Google pour démarrer.")
+    btn = "https://developers.google.com/identity/images/btn_google_signin_light_normal_web.png"
+    st.markdown(f"[![Continue with Google]({btn})]({auth_url})", unsafe_allow_html=True)
     st.stop()
 
-# c) Si Google renvoie un code, on l’échange contre un token
+# c) Si Google renvoie un code, on l’échange contre un token valide
 if code:
     flow.fetch_token(code=code)
     creds = flow.credentials
-    # Sauvegarde pour réutilisation
+    # Sauvegarde du token
     with open("token.json", "w", encoding="utf-8") as f:
         f.write(creds.to_json())
-    st.experimental_set_query_params()  # nettoie l’URL
+    st.experimental_set_query_params()  # nettoie les query params
 
-# ─── 3) AUTHENTIFICATION OK → CHARGEMENT DES LIBS MÉTIER ─────────────────────
+# À partir d’ici, token.json existe (ou vient d’être créé) → authentifié
+
+# ─── 3) IMPORT DES MODULES MÉTIER ─────────────────────────────────────────────
 from clients.manager import ClientManager
 from sheets.gsheets import get_sheet_manager
 from streamlit_contextualisation import page_contextualisation
 from utils.prompts import get_title_prompt, get_description_prompt
 from generators.openai_provider import OpenAIProvider
 
-# ─── 4) Instanciation des managers ────────────────────────────────────────────
+# ─── 4) INSTANTIATION DES MANAGERS ────────────────────────────────────────────
 client_manager = ClientManager()
-sheet_manager  = get_sheet_manager()  # charge & rafraîchit token.json si besoin
+sheet_manager  = get_sheet_manager()  # charge et rafraîchit token.json si besoin
 
-# ─── 5) Définition des pages ─────────────────────────────────────────────────
+# ─── 5) DÉFINITION DES PAGES ─────────────────────────────────────────────────
 def page_clients():
     st.header("Gestion des clients")
     client_manager.render_ui()
@@ -108,7 +120,7 @@ def page_generation():
         return
 
     brief = client_manager.get_global_brief(client)
-    sid = client_manager.get_sheet_id(client)
+    sid   = client_manager.get_sheet_id(client)
     if not sid:
         st.warning("⚠️ Créez d’abord le Google Sheet.")
         return
@@ -148,11 +160,11 @@ def page_results():
         st.dataframe(df)
         st.download_button(
             "Télécharger CSV",
-            df.to_csv(index=False).encode("utf-8"),
+           .df.to_csv(index=False).encode("utf-8"),
             file_name=f"{client}_ads.csv"
         )
 
-# ─── 6) Navigation ────────────────────────────────────────────────────────────
+# ─── 6) NAVIGATION ─────────────────────────────────────────────────────────────
 def main():
     st.sidebar.title("Navigation")
     choices = [
