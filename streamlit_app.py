@@ -17,8 +17,8 @@ Pour commencer, connectez-vous avec votre compte Google ci-dessous.
 """)
 
 # ─── 2) Bouton “Continue with Google” (Google Identity Services) ──────────────
-GSI_CLIENT_ID = "850645921594-fk7ui31vi4dmn28keau12f1nlu001967.apps.googleusercontent.com"           # Remplacez par votre client_id
-REDIRECT_URI  = "https://app-ads-utility-t9injwcft7vwzxhtpaxwia.streamlit.app/"  # L’URL publique de votre app
+GSI_CLIENT_ID = "<VOTRE_CLIENT_ID_OAUTH>"           # Remplacez par votre client_id
+REDIRECT_URI  = "https://votre-app.streamlit.app/"  # L’URL publique de votre app (doit matcher l’OAuth)
 
 st.markdown(f"""
 <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -45,29 +45,33 @@ from google.auth.transport import requests as google_requests
 from google.oauth2.credentials import Credentials
 import os
 
-params   = st.experimental_get_query_params()
+# Utiliser st.query_params (et non plus experimental_get_query_params)
+params   = st.query_params
 raw_tok  = params.get("credential", [None])[0]
 
 if not raw_tok:
-    # L’utilisateur n’a pas encore cliqué ou consenti : on bloque tout le reste
+    # Tant que l'utilisateur n'a pas cliqué / consenti, on stoppe l'exécution
     st.stop()
 
 try:
-    # Vérifier l’ID token reçu
+    # Vérifier l’ID token JWT renvoyé par Google
     id_info = google_id_token.verify_oauth2_token(raw_tok, google_requests.Request(), GSI_CLIENT_ID)
-    # Construire les Credentials pour Sheets API (ici on suppose offline access/config côté GCP)
+
+    # Construire un objet Credentials pour Google Sheets
     creds = Credentials(
         token=None,
         refresh_token=id_info.get("refresh_token"),
         token_uri="https://oauth2.googleapis.com/token",
         client_id=GSI_CLIENT_ID,
-        client_secret="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"
+        client_secret="<VOTRE_CLIENT_SECRET>"
     )
-    # Sauvegarde pour réutilisation
+
+    # Sauvegarder le token pour réutilisation future
     with open("token.json", "w", encoding="utf-8") as f:
         f.write(creds.to_json())
+
 except ValueError:
-    st.error("Authentification Google invalide, veuillez réessayer.")
+    st.error("❌ Authentification Google invalide, veuillez réessayer.")
     st.stop()
 
 # ─── 4) Import des modules métiers ─────────────────────────────────────────────
@@ -77,9 +81,9 @@ from streamlit_contextualisation import page_contextualisation
 from utils.prompts        import get_title_prompt, get_description_prompt
 from generators.openai_provider import OpenAIProvider
 
-# ─── 5) Managers ───────────────────────────────────────────────────────────────
+# ─── 5) Instanciation des managers ────────────────────────────────────────────
 client_manager = ClientManager()
-sheet_manager  = get_sheet_manager()  # Chargera token.json et rafraîchira si besoin
+sheet_manager  = get_sheet_manager()  # Charge token.json et rafraîchit si nécessaire
 
 # ─── 6) Définition des pages ─────────────────────────────────────────────────
 def page_clients():
@@ -97,11 +101,11 @@ def page_google_sheet():
     if st.button("Créer la feuille vierge dans Google Sheets"):
         try:
             sid = sheet_manager.create_template(title)
-            st.success(f"Sheet créé avec succès ! ID : {sid}")
+            st.success(f"✅ Sheet créé avec succès ! ID : {sid}")
             st.markdown(f"[Ouvrir le Google Sheet](https://docs.google.com/spreadsheets/d/{sid})")
             client_manager.save_sheet_id(client, sid)
         except Exception as e:
-            st.error(f"Erreur lors de la création du Sheet : {e}")
+            st.error(f"Erreur lors de la création du sheet : {e}")
 
 def page_contextualisation_wrapper():
     page_contextualisation()
@@ -121,18 +125,18 @@ def page_generation():
     st.header("Génération des annonces")
     client = client_manager.current_client
     if not client:
-        st.warning("Sélectionnez un client avant de générer.")
+        st.warning("⚠️ Sélectionnez un client avant de lancer la génération.")
         return
 
     brief = client_manager.get_global_brief(client)
     sid   = client_manager.get_sheet_id(client)
     if not sid:
-        st.warning("Aucun Google Sheet associé. Créez-le d’abord.")
+        st.warning("⚠️ Aucune feuille Google associée. Créez-la d’abord.")
         return
 
     records = sheet_manager.import_sheet(sid)
     if not records:
-        st.info("Aucune donnée à traiter dans le sheet.")
+        st.info("ℹ️ Aucune donnée à traiter dans le sheet.")
         return
 
     for rec in records:
@@ -155,12 +159,12 @@ def page_results():
     client = client_manager.current_client
     sid    = client_manager.get_sheet_id(client)
     if not sid:
-        st.warning("Aucun Google Sheet associé. Rien à afficher.")
+        st.warning("⚠️ Aucune feuille Google associée. Rien à afficher.")
         return
 
     df = sheet_manager.fetch_sheet_dataframe(sid)
     if df.empty:
-        st.info("Le sheet est vide.")
+        st.info("ℹ️ Le sheet est vide.")
     else:
         st.dataframe(df)
         csv = df.to_csv(index=False).encode("utf-8")
@@ -179,13 +183,13 @@ def main():
         "Résultats"
     ])
 
-    if   choix == "Clients":          page_clients()
-    elif choix == "Brief Global":     page_brief_global()
-    elif choix == "Google Sheet":     page_google_sheet()
-    elif choix == "Contextualisation":page_contextualisation_wrapper()
-    elif choix == "Configuration IA": page_configuration_ia()
-    elif choix == "Génération":       page_generation()
-    elif choix == "Résultats":        page_results()
+    if   choix == "Clients":           page_clients()
+    elif choix == "Brief Global":      page_brief_global()
+    elif choix == "Google Sheet":      page_google_sheet()
+    elif choix == "Contextualisation": page_contextualisation_wrapper()
+    elif choix == "Configuration IA":  page_configuration_ia()
+    elif choix == "Génération":        page_generation()
+    elif choix == "Résultats":         page_results()
 
 if __name__ == "__main__":
     main()
