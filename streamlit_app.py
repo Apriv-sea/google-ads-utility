@@ -6,31 +6,29 @@ from google.oauth2.credentials import Credentials
 # ─── 0) Configuration de la page ─────────────────────────────────────────────
 st.set_page_config(page_title="IA Ad Generator", layout="wide")
 
-# ─── 1) INITIALISATION DU FLOW & PERSISTENCE DANS SESSION STATE ──────────────
+# ─── 1) INITIALISATION DU FLOW & STOCKAGE DANS LA SESSION ───────────────────
 REDIRECT_URI = "https://app-ads-utility-t9injwcft7vwzxhtpaxwia.streamlit.app/"
 
-if "oauth_flow_state" not in st.session_state:
+if "oauth_flow" not in st.session_state:
+    # Création initiale du Flow + génération d'auth_url
     flow = Flow.from_client_secrets_file(
         "credentials.json",
         scopes=["https://www.googleapis.com/auth/spreadsheets"],
         redirect_uri=REDIRECT_URI
     )
-    st.session_state.oauth_flow_state = flow.state
+    auth_url, _ = flow.authorization_url(prompt="consent", access_type="offline")
+    st.session_state.oauth_flow = flow
+    st.session_state.auth_url   = auth_url
 else:
-    flow = Flow.from_client_secrets_file(
-        "credentials.json",
-        scopes=["https://www.googleapis.com/auth/spreadsheets"],
-        redirect_uri=REDIRECT_URI,
-        state=st.session_state.oauth_flow_state
-    )
-
-auth_url, _ = flow.authorization_url(prompt="consent", access_type="offline")
+    # Récupération du Flow et de l'URL pré-générée
+    flow     = st.session_state.oauth_flow
+    auth_url = st.session_state.auth_url
 
 # ─── 2) GESTION DU LOGIN ──────────────────────────────────────────────────────
 params = st.query_params
 code   = params.get("code", [None])[0]
 
-# a) redirection vers Google après clic sur le bouton
+# a) redirection vers Google si on a cliqué
 if "auth_url" in params:
     st.experimental_set_query_params()
     st.markdown(
@@ -39,7 +37,7 @@ if "auth_url" in params:
     )
     st.stop()
 
-# b) afficher la page de login tant qu’on n’a ni code ni token.json
+# b) si ni code ni token, afficher le bouton
 if code is None and not os.path.exists("token.json"):
     st.title("Welcome to IA Ad Generator")
     st.write("Connectez-vous avec votre compte Google pour démarrer.")
@@ -53,13 +51,13 @@ if code:
     creds = flow.credentials
     with open("token.json", "w", encoding="utf-8") as f:
         f.write(creds.to_json())
-    st.experimental_set_query_params()
+    st.experimental_set_query_params()  # nettoie ?code
 
 # ─── 3) IMPORT DES MODULES MÉTIER ─────────────────────────────────────────────
 from clients.manager import ClientManager
-from sheets.gsheets import get_sheet_manager
+from sheets.gsheets       import get_sheet_manager
 from streamlit_contextualisation import page_contextualisation
-from utils.prompts import get_title_prompt, get_description_prompt
+from utils.prompts        import get_title_prompt, get_description_prompt
 from generators.openai_provider import OpenAIProvider
 
 # ─── 4) Instanciation des managers ────────────────────────────────────────────
@@ -78,7 +76,10 @@ def page_brief_global():
 def page_google_sheet():
     st.header("Google Sheet")
     client = client_manager.current_client
-    title  = st.text_input("Nom du Google Sheet à créer", value=f"{client}_template" if client else "")
+    title  = st.text_input(
+        "Nom du Google Sheet à créer",
+        value=f"{client}_template" if client else ""
+    )
     if st.button("Créer la feuille vierge"):
         try:
             sid = sheet_manager.create_template(title)
@@ -129,9 +130,9 @@ def page_generation():
         if st.button(f"Générer {camp}/{ag}"):
             tp = get_title_prompt(brief, ctx, ag, kws)
             dp = get_description_prompt(brief, ctx, ag, kws)
-            prov    = OpenAIProvider(model=st.session_state.model)
-            titles  = prov.generate(tp)
-            descs   = prov.generate(dp)
+            prov   = OpenAIProvider(model=st.session_state.model)
+            titles = prov.generate(tp)
+            descs  = prov.generate(dp)
             sheet_manager.write_results(sid, camp, ag, titles, descs)
             st.success(f"Terminé pour {camp}/{ag}")
 
@@ -148,7 +149,6 @@ def page_results():
         st.info("ℹ️ Le sheet est vide.")
     else:
         st.dataframe(df)
-        # Correction : suppression du point en trop et stockage du CSV dans csv_data
         csv_data = df.to_csv(index=False).encode("utf-8")
         st.download_button(
             label="Télécharger CSV",
