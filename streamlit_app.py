@@ -1,13 +1,17 @@
 import streamlit as st
+
+# 1) Page config DOIT être la première commande Streamlit
+st.set_page_config(page_title="IA Ad Generator", layout="wide")
+
+# 2) Imports métier
 from clients.manager import ClientManager
 from sheets.gsheets import get_sheet_manager
 from streamlit_contextualisation import page_contextualisation
 from utils.prompts import get_title_prompt, get_description_prompt
 from generators.openai_provider import OpenAIProvider
 
-# Initialize managers
+# 3) Initialisation du manager client (pas de widget ici)
 client_manager = ClientManager()
-sheet_manager = get_sheet_manager()
 
 def page_clients():
     st.header("Gestion des clients")
@@ -24,7 +28,10 @@ def page_google_sheet():
         "Nom du Google Sheet à créer",
         value=f"{client}_template" if client else ""
     )
+
+    # On crée le sheet en appelant l'auth + API ici
     if st.button("Créer la feuille vierge dans Google Sheets"):
+        sheet_manager = get_sheet_manager()
         try:
             spreadsheet_id = sheet_manager.create_template(sheet_title)
             st.success(f"Sheet créé avec succès ! ID : {spreadsheet_id}")
@@ -33,16 +40,21 @@ def page_google_sheet():
         except Exception as e:
             st.error(f"Erreur lors de la création du Google Sheet : {e}")
 
+def page_contextualisation_wrapper():
+    # Page de contextualisation fait elle-même appel à get_sheet_manager() si besoin
+    page_contextualisation()
+
 def page_configuration_ia():
     st.header("Configuration IA")
     st.session_state.provider = st.selectbox("Prestataire IA", ["OpenAI", "Anthropic"])
     st.session_state.model = st.selectbox(
         "Modèle",
-        sheet_manager.get_available_models(st.session_state.provider)
+        # On peut appeler get_sheet_manager uniquement pour récupérer les modèles dispo
+        get_sheet_manager().get_available_models(st.session_state.provider)
     )
     st.session_state.language = st.selectbox("Langue", ["fr", "en"])
-    st.session_state.ton = st.select_slider("Ton", options=["formel", "convivial", "persuasif"])
-    st.session_state.length = st.slider("Longueur souhaitée", min_value=10, max_value=100, value=30)
+    st.session_state.ton = st.select_slider("Ton", ["formel", "convivial", "persuasif"])
+    st.session_state.length = st.slider("Longueur souhaitée", 10, 100, 30)
 
 def page_generation():
     st.header("Génération des annonces")
@@ -57,6 +69,7 @@ def page_generation():
         st.warning("Aucun Google Sheet associé. Créez d'abord la feuille.")
         return
 
+    sheet_manager = get_sheet_manager()
     records = sheet_manager.import_sheet(spreadsheet_id)
     if not records:
         st.info("Aucune donnée à traiter dans le Google Sheet.")
@@ -85,6 +98,7 @@ def page_results():
         st.warning("Aucun Google Sheet associé. Rien à afficher.")
         return
 
+    sheet_manager = get_sheet_manager()
     df = sheet_manager.fetch_sheet_dataframe(spreadsheet_id)
     if df.empty:
         st.info("Le Google Sheet est vide.")
@@ -94,7 +108,6 @@ def page_results():
         st.download_button("Télécharger CSV", data=csv, file_name=f"{client}_ads.csv")
 
 def main():
-    st.set_page_config(page_title="IA Ad Generator", layout="wide")
     st.sidebar.title("Navigation")
     page = st.sidebar.radio("Aller à", [
         "Clients",
@@ -113,7 +126,7 @@ def main():
     elif page == "Google Sheet":
         page_google_sheet()
     elif page == "Contextualisation":
-        page_contextualisation()
+        page_contextualisation_wrapper()
     elif page == "Configuration IA":
         page_configuration_ia()
     elif page == "Génération":
