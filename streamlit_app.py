@@ -1,91 +1,67 @@
 import streamlit as st
+from google_auth_oauthlib.flow import Flow
+from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
+import os
 
 # ─── 0) Configuration de la page ─────────────────────────────────────────────
 st.set_page_config(page_title="IA Ad Generator", layout="wide")
 
-# ─── 1) Message d’accueil ─────────────────────────────────────────────────────
-st.markdown("""
-# Bienvenue sur l’IA Ad Generator
+# ─── 1) Gestion du flow OAuth via bouton Streamlit ──────────────────────────
+REDIRECT_URI = "https://votre-app.streamlit.app/"  # doit matcher vos credentials OAuth
 
-Cet utilitaire Web vous aide à :
-- Gérer vos clients (dossiers, briefs).
-- Générer automatiquement, via l’IA (OpenAI/Anthropic), **10 titres** et **5 descriptions** d’annonces Google.
-- Synchroniser directement avec Google Sheets pour remplir vos campagnes et Ad Groups.
-- Exporter vos résultats en un clic.
-
-Pour commencer, connectez-vous avec votre compte Google ci-dessous.
-""")
-
-# ─── 2) Bouton “Continue with Google” (Google Identity Services) ──────────────
-GSI_CLIENT_ID = "<VOTRE_CLIENT_ID_OAUTH>"           # Remplacez par votre client_id
-REDIRECT_URI  = "https://votre-app.streamlit.app/"  # L’URL publique de votre app (doit matcher l’OAuth)
-
-st.markdown(f"""
-<script src="https://accounts.google.com/gsi/client" async defer></script>
-
-<div id="g_id_onload"
-     data-client_id="{GSI_CLIENT_ID}"
-     data-login_uri="{REDIRECT_URI}"
-     data-auto_prompt="false">
-</div>
-
-<div class="g_id_signin"
-     data-type="standard"
-     data-size="large"
-     data-theme="outline"
-     data-text="signin_with"
-     data-shape="rectangular"
-     data-logo_alignment="left">
-</div>
-""", unsafe_allow_html=True)
-
-# ─── 3) Récupération et validation du token Google ─────────────────────────────
-from google.oauth2 import id_token as google_id_token
-from google.auth.transport import requests as google_requests
-from google.oauth2.credentials import Credentials
-import os
-
-# Utiliser st.query_params (et non plus experimental_get_query_params)
-params   = st.query_params
-raw_tok  = params.get("credential", [None])[0]
-
-if not raw_tok:
-    # Tant que l'utilisateur n'a pas cliqué / consenti, on stoppe l'exécution
+# a) Si on revient avec auth_url en query params, on redirige immédiatement
+params = st.experimental_get_query_params()
+if "auth_url" in params:
+    auth_url = params["auth_url"][0]
+    st.markdown(f'<meta http-equiv="refresh" content="0; url={auth_url}" />',
+                unsafe_allow_html=True)
+    st.experimental_set_query_params()  # nettoie l'URL
     st.stop()
 
-try:
-    # Vérifier l’ID token JWT renvoyé par Google
-    id_info = google_id_token.verify_oauth2_token(raw_tok, google_requests.Request(), GSI_CLIENT_ID)
-
-    # Construire un objet Credentials pour Google Sheets
-    creds = Credentials(
-        token=None,
-        refresh_token=id_info.get("refresh_token"),
-        token_uri="https://oauth2.googleapis.com/token",
-        client_id=GSI_CLIENT_ID,
-        client_secret="<VOTRE_CLIENT_SECRET>"
+# b) Si on n'a pas encore de code, afficher bouton "Continue with Google"
+code = params.get("code", [None])[0]
+if not code and not os.path.exists("token.json"):
+    st.markdown("# Bienvenue sur l’IA Ad Generator")
+    st.write("Pour commencer, connectez-vous avec votre compte Google ci-dessous.")
+    flow = Flow.from_client_secrets_file(
+        'credentials.json',
+        scopes=['https://www.googleapis.com/auth/spreadsheets'],
+        redirect_uri=REDIRECT_URI
     )
+    auth_url, _ = flow.authorization_url(prompt='consent', access_type='offline')
+    if st.button("Continue with Google"):
+        st.experimental_set_query_params(auth_url=auth_url)
+    st.stop()
 
-    # Sauvegarder le token pour réutilisation future
+# c) Si Google nous renvoie un code, on l'échange contre des credentials
+if code:
+    flow = Flow.from_client_secrets_file(
+        'credentials.json',
+        scopes=['https://www.googleapis.com/auth/spreadsheets'],
+        redirect_uri=REDIRECT_URI
+    )
+    flow.fetch_token(code=code)
+    creds = flow.credentials
+    # Sauvegarde du token pour réutilisation
     with open("token.json", "w", encoding="utf-8") as f:
         f.write(creds.to_json())
+    # Nettoyer le code de l'URL
+    st.experimental_set_query_params()
+# d) Si token.json existe déjà, on considère l'utilisateur authentifié
 
-except ValueError:
-    st.error("❌ Authentification Google invalide, veuillez réessayer.")
-    st.stop()
-
-# ─── 4) Import des modules métiers ─────────────────────────────────────────────
+# ─── 2) Import des modules métiers ─────────────────────────────────────────────
 from clients.manager import ClientManager
 from sheets.gsheets       import get_sheet_manager
 from streamlit_contextualisation import page_contextualisation
 from utils.prompts        import get_title_prompt, get_description_prompt
 from generators.openai_provider import OpenAIProvider
 
-# ─── 5) Instanciation des managers ────────────────────────────────────────────
+# ─── 3) Instanciation des managers ────────────────────────────────────────────
 client_manager = ClientManager()
-sheet_manager  = get_sheet_manager()  # Charge token.json et rafraîchit si nécessaire
+sheet_manager  = get_sheet_manager()  # charge et rafraîchit token.json
 
-# ─── 6) Définition des pages ─────────────────────────────────────────────────
+# ─── 4) Définition des pages ─────────────────────────────────────────────────
 def page_clients():
     st.header("Gestion des clients")
     client_manager.render_ui()
@@ -101,7 +77,7 @@ def page_google_sheet():
     if st.button("Créer la feuille vierge dans Google Sheets"):
         try:
             sid = sheet_manager.create_template(title)
-            st.success(f"✅ Sheet créé avec succès ! ID : {sid}")
+            st.success(f"✅ Sheet créé ! ID : {sid}")
             st.markdown(f"[Ouvrir le Google Sheet](https://docs.google.com/spreadsheets/d/{sid})")
             client_manager.save_sheet_id(client, sid)
         except Exception as e:
@@ -125,7 +101,7 @@ def page_generation():
     st.header("Génération des annonces")
     client = client_manager.current_client
     if not client:
-        st.warning("⚠️ Sélectionnez un client avant de lancer la génération.")
+        st.warning("⚠️ Sélectionnez un client avant de générer.")
         return
 
     brief = client_manager.get_global_brief(client)
@@ -146,9 +122,9 @@ def page_generation():
         ctx  = client_manager.get_campaign_context(client, camp)
 
         if st.button(f"Générer pour {camp} / {ag}"):
-            tp = get_title_prompt(brief, ctx, ag, kws)
-            dp = get_description_prompt(brief, ctx, ag, kws)
-            prov = OpenAIProvider(model=st.session_state.model)
+            tp    = get_title_prompt(brief, ctx, ag, kws)
+            dp    = get_description_prompt(brief, ctx, ag, kws)
+            prov  = OpenAIProvider(model=st.session_state.model)
             titles = prov.generate(tp)
             descs  = prov.generate(dp)
             sheet_manager.write_results(sid, camp, ag, titles, descs)
@@ -170,7 +146,7 @@ def page_results():
         csv = df.to_csv(index=False).encode("utf-8")
         st.download_button("Télécharger CSV", data=csv, file_name=f"{client}_ads.csv")
 
-# ─── 7) Navigation et exécution ────────────────────────────────────────────────
+# ─── 5) Navigation et exécution ────────────────────────────────────────────────
 def main():
     st.sidebar.title("Navigation")
     choix = st.sidebar.radio("Aller à", [
