@@ -5,94 +5,153 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from google.auth.transport.requests import Request
 
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 
 class SheetManager:
+    """
+    Gère l'authentification OAuth2 et les opérations Google Sheets :
+    - création d'un template de sheet
+    - lecture des données
+    - écriture des résultats
+    """
+
     def __init__(self):
         self.creds = None
         self.service = None
 
     def authenticate(self):
+        """
+        Effectue l'OAuth2 flow et stocke localement le token JSON
+        """
         token_path = 'token.json'
         creds = None
+
+        # Chargement des credentials existants
         if os.path.exists(token_path):
             creds = Credentials.from_authorized_user_file(token_path, SCOPES)
+
+        # Si pas de credentials valides, lancer l'authorization flow
         if not creds or not creds.valid:
-            flow = Flow.from_client_secrets_file(
-                'credentials.json', SCOPES,
-                redirect_uri='urn:ietf:wg:oauth:2.0:oob'
-            )
-            auth_url, _ = flow.authorization_url(prompt='consent')
-            st.write("Veuillez vous rendre sur ce lien pour autoriser l'accès :")
-            st.write(auth_url)
-            code = st.text_input('Entrez le code de validation')
-            if code:
-                flow.fetch_token(code=code)
-                creds = flow.credentials
-                with open(token_path, 'w') as token_file:
-                    token_file.write(creds.to_json())
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            else:
+                flow = Flow.from_client_secrets_file(
+                    'credentials.json', SCOPES,
+                    redirect_uri='urn:ietf:wg:oauth:2.0:oob'
+                )
+                auth_url, _ = flow.authorization_url(prompt='consent')
+                st.write("Veuillez vous rendre sur ce lien pour autoriser l'accès :")
+                st.write(auth_url)
+                code = st.text_input('Entrez le code de validation')
+                if code:
+                    flow.fetch_token(code=code)
+                    creds = flow.credentials
+                    # Sauvegarde locale du token
+                    with open(token_path, 'w') as token_file:
+                        token_file.write(creds.to_json())
+
         self.creds = creds
         self.service = build('sheets', 'v4', credentials=creds)
 
     def create_template(self, sheet_title: str) -> str:
-        with open(os.path.join(os.path.dirname(__file__), 'template.json')) as f:
+        """
+        Crée un nouveau Google Sheet avec les en-têtes définis dans template.json
+        Renvoie l'ID du sheet.
+        """
+        # Charger le template d'en-têtes
+        with open(os.path.join(os.path.dirname(__file__), 'template.json'), encoding='utf-8') as f:
             headers = json.load(f)['headers']
+
+        # Création du spreadsheet
         body = {
             'properties': {'title': sheet_title},
             'sheets': [{'properties': {'title': 'Campagnes'}}]
         }
         sheet = self.service.spreadsheets().create(body=body, fields='spreadsheetId').execute()
         spreadsheet_id = sheet['spreadsheetId']
-        header_range = 'Campagnes!A1:{}1'.format(chr(ord('A') + len(headers) - 1))
+
+        # Écriture des en-têtes
+        header_range = f"Campagnes!A1:{chr(ord('A') + len(headers) - 1)}1"
         self.service.spreadsheets().values().update(
             spreadsheetId=spreadsheet_id,
             range=header_range,
             valueInputOption='RAW',
             body={'values': [headers]}
         ).execute()
+
         return spreadsheet_id
 
     def import_sheet(self, spreadsheet_id: str) -> list:
+        """
+        Lit toutes les lignes du sheet et renvoie une liste de dict par ligne.
+        """
         try:
+            # Récupérer les en-têtes
             meta = self.service.spreadsheets().values().get(
                 spreadsheetId=spreadsheet_id,
                 range='Campagnes!A1:Z1'
             ).execute()
             headers = meta.get('values', [])[0]
+
+            # Lire toutes les lignes suivantes
             data = self.service.spreadsheets().values().get(
                 spreadsheetId=spreadsheet_id,
                 range='Campagnes!A2:Z'
             ).execute().get('values', [])
+
+            # Construire liste de dicts
             records = []
             for row in data:
                 record = {headers[i]: row[i] if i < len(row) else '' for i in range(len(headers))}
                 records.append(record)
+
             return records
+
         except HttpError as e:
-            st.error(f"Erreur d'import Sheet: {e}")
+            st.error(f"Erreur d'import Sheet : {e}")
             return []
 
-    def write_results(self, spreadsheet_id: str, campaign_name: str, adgroup_name: str, titles: list, descriptions: list):
+    def write_results(self,
+                      spreadsheet_id: str,
+                      campaign_name: str,
+                      adgroup_name: str,
+                      titles: list,
+                      descriptions: list):
+        """
+        Insère les listes de titres et descriptions dans les colonnes appropriées,
+        en écrasant les anciennes valeurs si présentes.
+        """
         records = self.import_sheet(spreadsheet_id)
-        headers = list(records[0].keys()) if records else []
-        for idx, record in enumerate(records, start=2):
+        if not records:
+            st.warning("Aucune donnée trouvée dans le sheet pour écrire les résultats.")
+            return
+
+        headers = list(records[0].keys())
+
+        # Trouver la ligne correspondant à la campagne et à l'ad group
+        for idx, record in enumerate(records, start=2):  # la ligne 2 correspond à A2
             if record.get('Campagne') == campaign_name and record.get('Ad Group') == adgroup_name:
                 row_idx = idx
                 break
         else:
-            st.warning(f"Ligne non trouvée pour Campagne={campaign_name}, Ad Group={adgroup_name}")
+            st.warning(f"Ligne non trouvée pour Campagne='{campaign_name}', Ad Group='{adgroup_name}'")
             return
+
+        # Écriture des titres (colonnes Titre 1–10)
         title_idx = headers.index('Titre 1')
-        title_range = f"Campagnes!{chr(ord('A')+title_idx)}{row_idx}:{chr(ord('A')+title_idx+len(titles)-1)}{row_idx}"
+        title_range = f"Campagnes!{chr(ord('A') + title_idx)}{row_idx}:{chr(ord('A') + title_idx + len(titles) - 1)}{row_idx}"
         self.service.spreadsheets().values().update(
             spreadsheetId=spreadsheet_id,
             range=title_range,
             valueInputOption='RAW',
             body={'values': [titles]}
         ).execute()
+
+        # Écriture des descriptions (colonnes Description 1–5)
         desc_idx = headers.index('Description 1')
-        desc_range = f"Campagnes!{chr(ord('A')+desc_idx)}{row_idx}:{chr(ord('A')+desc_idx+len(descriptions)-1)}{row_idx}"
+        desc_range = f"Campagnes!{chr(ord('A') + desc_idx)}{row_idx}:{chr(ord('A') + desc_idx + len(descriptions) - 1)}{row_idx}"
         self.service.spreadsheets().values().update(
             spreadsheetId=spreadsheet_id,
             range=desc_range,
@@ -101,12 +160,19 @@ class SheetManager:
         ).execute()
 
     def fetch_sheet_dataframe(self, spreadsheet_id: str):
+        """
+        Lit tout le sheet et renvoie un pandas.DataFrame pour affichage dans Streamlit.
+        """
         import pandas as pd
         records = self.import_sheet(spreadsheet_id)
         return pd.DataFrame(records)
 
-@st.experimental_singleton
+
+@st.cache(allow_output_mutation=True)
 def get_sheet_manager():
+    """
+    Singleton Streamlit pour le manager Google Sheets.
+    """
     mgr = SheetManager()
     mgr.authenticate()
     return mgr
