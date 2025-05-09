@@ -12,29 +12,45 @@ def select_model():
     model = st.selectbox("Modèle", MODELS[provider])
     return provider, model
 
-# Prompts pour la génération IA
+# Prompt IA pour générer les TITRES (30 caractères max)
 def get_title_prompt(contexte_entreprise, contexte_campagne, adgroup, keywords):
     return f"""
-Tu es un expert en rédaction publicitaire Google Ads.
-Voici les informations à connaître :
-Entreprise : {contexte_entreprise}
-Campagne : {contexte_campagne}
-Groupe d'annonces : {adgroup}
-Mots clés : {keywords}
+Vous êtes un rédacteur publicitaire hautement qualifié avec une solide expérience en rédaction persuasive, en optimisation des conversions et en techniques de marketing.
 
-Ta mission est de générer une liste JSON contenant **exactement 10 titres** de 30 caractères maximum chacun, parfaitement adaptés.
-Réponds uniquement avec un tableau JSON de chaînes, sans autre texte.
+Vous rédigez des textes convaincants qui touchent les émotions et les besoins du public cible, les incitant à agir ou à acheter. Vous maîtrisez la méthode AIDA (Attention, Intérêt, Désir, Action) et d'autres approches efficaces. Vous avez un talent pour les titres accrocheurs et les appels à l'action persuasifs, tout en comprenant la psychologie des consommateurs.
+
+En vous basant sur :
+- l'annonceur : \"{contexte_entreprise}\"
+- le rôle de la campagne : \"{contexte_campagne}\"
+- le nom de l'ad group : \"{adgroup}\" (qui peut contenir une marque ou une typologie produit)
+- les top mots clés associés : \"{keywords}\"
+
+Rédigez une liste de **10 titres sobres et engageants** pour des annonces Google Ads, en respectant strictement **30 caractères maximum** par titre.
+
+✅ Mentionnez la marque uniquement dans **5 titres sur 10**
+❌ Ne proposez rien si cela dépasse la limite
+📄 Affichez **uniquement la liste**, sans numéro, tiret, ou introduction
+
+Chaque titre doit apparaître **sur une ligne différente**, sans mise en forme.
 """
 
+# Prompt IA pour générer les DESCRIPTIONS (90 caractères max)
 def get_desc_prompt(contexte_entreprise, contexte_campagne, adgroup, keywords):
     return f"""
-Tu es un expert en rédaction publicitaire Google Ads.
-Voici les informations à connaître :
-Entreprise : {contexte_entreprise}
-Campagne : {contexte_campagne}
-Groupe d'annonces : {adgroup}
-Mots clés : {keywords}
+Vous êtes un rédacteur publicitaire hautement qualifié avec une solide expérience en rédaction persuasive, en optimisation des conversions et en techniques de marketing.
 
-Ta mission est de générer une liste JSON contenant **exactement 5 descriptions** de 90 caractères maximum chacune.
-Réponds uniquement avec un tableau JSON de chaînes, sans autre texte.
+Vous rédigez des textes convaincants qui touchent les émotions et les besoins du public cible, les incitant à agir ou à acheter. Vous maîtrisez la méthode AIDA (Attention, Intérêt, Désir, Action) et d'autres approches efficaces. Vous avez un talent pour les introductions captivantes et les appels à l'action persuasifs, tout en comprenant la psychologie des consommateurs.
+
+En vous basant sur :
+- l'annonceur : \"{contexte_entreprise}\"
+- le rôle de la campagne : \"{contexte_campagne}\"
+- le nom de l'ad group : \"{adgroup}\" (qui peut contenir une marque ou une typologie produit)
+- les top mots clés associés : \"{keywords}\"
+
+Rédigez une liste de **5 descriptions engageantes** pour des annonces Google Ads, en respectant strictement **90 caractères maximum** par description.
+
+❌ Ne proposez rien si cela dépasse la limite
+📄 Affichez **uniquement la liste**, sans numéro, tiret, ou introduction
+
+Chaque description doit apparaître **sur une ligne différente**, sans mise en forme.
 """
