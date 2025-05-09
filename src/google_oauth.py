@@ -11,7 +11,7 @@ def login_user():
     if "user_email" in st.session_state:
         return
 
-    code = st.experimental_get_query_params().get("code", [None])[0]
+    code = st.query_params().get("code", [None])[0]
     if code:
         token_resp = requests.post("https://oauth2.googleapis.com/token", data={
             "code": code,
@@ -21,20 +21,27 @@ def login_user():
             "grant_type": "authorization_code"
         }).json()
         id_token = token_resp.get("id_token")
-        if id_token:
-            userinfo = requests.get("https://openidconnect.googleapis.com/v1/userinfo",
-                                    headers={"Authorization": f"Bearer {token_resp['access_token']}"}
-                                   ).json()
+        access_token = token_resp.get("access_token")
+
+        if id_token and access_token:
+            userinfo = requests.get("https://openidconnect.googleapis.com/v1/userinfo", headers={
+                "Authorization": f"Bearer {access_token}"
+            }).json()
             st.session_state["user_email"] = userinfo.get("email")
-    else:
+
+        st.experimental_set_query_params()
+
+    elif "user_email" not in st.session_state:
         auth_url = "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode({
             "client_id": CLIENT_ID,
+            "redirect_uri": REDIRECT_URI,
             "response_type": "code",
             "scope": SCOPE,
-            "redirect_uri": REDIRECT_URI,
-            "access_type": "offline"
+            "access_type": "offline",
+            "prompt": "consent"
         })
         st.markdown(f"[🔐 Se connecter avec Google]({auth_url})", unsafe_allow_html=True)
+        st.stop()
 
 def is_logged_in():
     return "user_email" in st.session_state
