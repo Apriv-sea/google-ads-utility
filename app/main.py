@@ -1,6 +1,6 @@
 # Entry point for the Streamlit app
 import streamlit as st
-from app.model_selector import select_model
+from model_selector import select_model
 
 st.title("Google Ads AI Assistant")
 
