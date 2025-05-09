@@ -11,7 +11,7 @@ def login_user():
     if "user_email" in st.session_state:
         return
 
-    # ✅ Utilisation correcte de query_params (sans parenthèses)
+    # Utilisation cohérente de la nouvelle API
     code = st.query_params.get("code", [None])[0]
     if code:
         token_resp = requests.post("https://oauth2.googleapis.com/token", data={
@@ -31,8 +31,8 @@ def login_user():
             ).json()
             st.session_state["user_email"] = userinfo_resp.get("email")
 
-        # Nettoie les paramètres de l'URL
-        st.experimental_set_query_params()
+        # Nettoyer les paramètres de l'URL avec la nouvelle API
+        st.query_params.clear()
 
     elif "user_email" not in st.session_state:
         auth_url = "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode({
