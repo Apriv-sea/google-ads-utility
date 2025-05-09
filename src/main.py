@@ -1,45 +1,46 @@
-
-# main.py — assistant structuré avec menu latéral
+# main.py — assistant structuré avec Google OAuth 2.0
 import streamlit as st
 from model_selector import select_model
 from context_storage import save_client_context, load_client_context
-from auth import load_google_credentials
 from sheets import create_template_sheet
 from generation import generate_ads_for_sheet
+from auth_google import login_user, is_logged_in, get_user_email
 
 st.set_page_config(page_title="Google Ads AI Assistant", layout="wide")
 
-# --- SESSION INIT ---
+# --- Authentification Google OAuth 2.0 ---
+login_user()
+if not is_logged_in():
+    st.warning("🔐 Veuillez vous connecter pour accéder à l'application.")
+    st.stop()
+
+user_email = get_user_email()
+
+# --- Navigation latérale ---
 if "page" not in st.session_state:
     st.session_state.page = "Accueil"
-if "user_email" not in st.session_state:
-    st.session_state.user_email = None
 
-# --- SIDEBAR ---
 with st.sidebar:
     st.title("🧭 Navigation")
     menu = st.radio("Aller vers :", ["Accueil", "Mon compte", "Mes clients"])
-    if st.session_state.user_email:
-        if st.button("🚪 Se déconnecter"):
-            st.session_state.clear()
-            st.experimental_rerun()
+    if st.button("🚪 Se déconnecter"):
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+        st.experimental_rerun()
     st.session_state.page = menu
 
-# --- ACCUEIL ---
+# --- Page Accueil ---
 if st.session_state.page == "Accueil":
     st.title("🚀 Bienvenue dans Google Ads AI Assistant")
     st.markdown("""
-    Cet outil vous aide à générer des titres et descriptions pour vos campagnes Google Ads à l’aide de différents modèles d’intelligence artificielle (OpenAI, Anthropic, Gemini).
+Cet outil vous aide à générer des titres et descriptions pour vos campagnes Google Ads à l’aide de différents modèles d’intelligence artificielle (OpenAI, Anthropic, Gemini).
 
-    👉 Utilisez le menu à gauche pour démarrer.
-    """)
+👉 Utilisez le menu à gauche pour démarrer.
+""")
 
-# --- MON COMPTE ---
+# --- Page Mon Compte ---
 elif st.session_state.page == "Mon compte":
-    st.header("🔐 Connexion et API")
-    credentials_dict = load_google_credentials()
-    user_email = credentials_dict.get("client_email", "default")
-    st.session_state.user_email = user_email
+    st.header("🔐 Mon Compte")
     st.success(f"Connecté avec : {user_email}")
 
     st.subheader("Clés API personnelles")
@@ -55,13 +56,12 @@ elif st.session_state.page == "Mon compte":
             "gemini_key": gemini_key,
         })
         save_client_context(user_email, "_meta", context_data)
-        st.success("Clés API sauvegardées !")
+        st.success("Clés API sauvegardées ✅")
 
-# --- CLIENTS ---
+# --- Page Mes Clients ---
 elif st.session_state.page == "Mes clients":
     st.header("📁 Gestion de vos clients")
     client_name = st.text_input("Nom du client")
-    user_email = st.session_state.user_email
 
     if user_email and client_name:
         context_data = load_client_context(user_email, client_name)
@@ -79,7 +79,7 @@ elif st.session_state.page == "Mes clients":
             st.success("Contexte sauvegardé ✅")
 
         if st.button("📄 Créer la feuille Google Sheets"):
-            sheet_url, sheet_id = create_template_sheet(credentials_dict, client_name)
+            sheet_url, sheet_id = create_template_sheet(user_email, client_name)
             context_data["sheet_id"] = sheet_id
             save_client_context(user_email, client_name, context_data)
             st.session_state.sheet_url = sheet_url
@@ -96,7 +96,7 @@ elif st.session_state.page == "Mes clients":
             if st.button("⚙️ Générer les assets IA"):
                 with st.spinner("Génération en cours..."):
                     generate_ads_for_sheet(
-                        credentials_dict,
+                        user_email,
                         context_data["sheet_id"],
                         context_data,
                         provider,
