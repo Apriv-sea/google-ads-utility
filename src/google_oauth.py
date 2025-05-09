@@ -11,7 +11,8 @@ def login_user():
     if "user_email" in st.session_state:
         return
 
-    code = st.query_params().get("code", [None])[0]
+    # ✅ Utilisation correcte de query_params (sans parenthèses)
+    code = st.query_params.get("code", [None])[0]
     if code:
         token_resp = requests.post("https://oauth2.googleapis.com/token", data={
             "code": code,
@@ -24,11 +25,13 @@ def login_user():
         access_token = token_resp.get("access_token")
 
         if id_token and access_token:
-            userinfo = requests.get("https://openidconnect.googleapis.com/v1/userinfo", headers={
-                "Authorization": f"Bearer {access_token}"
-            }).json()
-            st.session_state["user_email"] = userinfo.get("email")
+            userinfo_resp = requests.get(
+                "https://openidconnect.googleapis.com/v1/userinfo",
+                headers={"Authorization": f"Bearer {access_token}"}
+            ).json()
+            st.session_state["user_email"] = userinfo_resp.get("email")
 
+        # Nettoie les paramètres de l'URL
         st.experimental_set_query_params()
 
     elif "user_email" not in st.session_state:
