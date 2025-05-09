@@ -1,17 +1,8 @@
-import streamlit as st
-import os
-from urllib.parse import urlencode
-
-CLIENT_ID = st.secrets["oauth"]["client_id"]
-CLIENT_SECRET = st.secrets["oauth"]["client_secret"]
-REDIRECT_URI = st.secrets["oauth"]["redirect_uri"]
-SCOPE = "openid email profile"
-
 def login_user():
     if "user_email" in st.session_state:
         return
 
-    query_params = st.query_params
+    query_params = st.query_params()
     code = query_params.get("code", [None])[0]
 
     if code:
@@ -34,7 +25,7 @@ def login_user():
             }).json()
             st.session_state.user_email = userinfo_resp.get("email")
 
-        st.query_params.clear()
+        st.experimental_set_query_params()  # Nettoie les query params
 
     elif "user_email" not in st.session_state:
         auth_url = "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode({
@@ -47,9 +38,3 @@ def login_user():
         })
         st.markdown(f"[🔐 Se connecter avec Google]({auth_url})", unsafe_allow_html=True)
         st.stop()
-
-def is_logged_in():
-    return "user_email" in st.session_state
-
-def get_user_email():
-    return st.session_state.get("user_email", "inconnu")
